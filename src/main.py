@@ -2,8 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-from google.cloud.storage import Client
-from google.cloud.storage.aio import Storage
+from gcloud.aio.storage import Storage
 from datetime import datetime, timedelta
 import os
 import re
@@ -15,20 +14,17 @@ st.set_page_config(page_title="Weather MSLP Analysis", layout="wide")
 # Title
 st.title("🌊 MSLP Analysis: Time Series and South China Sea Map")
 
-# Initialize GCS clients
-sync_client = Client()
+# Initialize async GCS client
 async_client = Storage()
-
 bucket_name = "walter-weather-2"
 prefixes = ["gencast_mslp/", "gefs_mslp/"]
 
 @st.cache_data
-def list_csv_files(prefix):
+async def list_csv_files_async(prefix):
     try:
-        bucket = sync_client.get_bucket(bucket_name)
-        blobs = bucket.list_blobs(prefix=prefix)
+        blobs = await async_client.list_objects(bucket_name, prefix=prefix)
         pattern = r"mslp_\d{8}(12|00)\.csv$"
-        csv_files = [blob.name for blob in blobs if re.match(pattern, blob.name.split('/')[-1])]
+        csv_files = [blob['name'] for blob in blobs if re.match(pattern, blob['name'].split('/')[-1])]
         dates = []
         for file in csv_files:
             date_str = file.split('/')[-1].replace('mslp_', '').replace('.csv', '')
@@ -39,11 +35,13 @@ def list_csv_files(prefix):
         st.error(f"Error listing files from GCS: {e}")
         return []
 
+@st.cache_data
+def list_csv_files(prefix):
+    return asyncio.run(list_csv_files_async(prefix))
+
 async def load_data_async(file_path, dataset):
     try:
-        bucket = await async_client.get_bucket(bucket_name)
-        blob = bucket.get_blob(file_path)
-        data = await blob.download_as_bytes()
+        data = await async_client.download(bucket_name, file_path)
         df = pd.read_csv(pd.io.common.StringIO(data.decode('utf-8')))
         df['Dataset'] = dataset
         if dataset == "Gencast":
