@@ -65,9 +65,12 @@ if csv_files:
         all_samples = sorted(df['Sample'].unique())
         selected_samples = st.sidebar.multiselect("Select Samples", options=all_samples, default=all_samples)
         
-        # Statistics selection for time series
-        stat_options = ["Mean", "Median", "25th Percentile", "75th Percentile"]
-        selected_stats = st.sidebar.multiselect("Select Statistics to Plot", options=stat_options, default=[])
+        # Statistics selection for time series (restricted to two options)
+        stat_options = ["25th Percentile", "75th Percentile"]  # Restricted to spread visualization
+        selected_stats = st.sidebar.multiselect("Select Statistics to Plot (Max 2)", 
+                                               options=stat_options, 
+                                               default=stat_options, 
+                                               max_selections=2)
         
         # Latitude and Longitude filters for map
         st.sidebar.subheader("Map Filters (South China Sea)")
@@ -111,7 +114,24 @@ if csv_files:
                     name=f'Sample {sample}',
                     line=dict(dash='dash')
                 ))
-            for stat in selected_stats:
+            
+            # Plot statistics with filled area between them
+            if len(selected_stats) == 2:
+                # Ensure 75th Percentile is plotted second for fill
+                ordered_stats = sorted(selected_stats, key=lambda x: x if x != '25th Percentile' else 'z')  # Ensure 25th is first
+                for i, stat in enumerate(ordered_stats):
+                    if stat in stats_df.columns:
+                        fig_time.add_trace(go.Scatter(
+                            x=stats_df['Forecast_Datetime'],
+                            y=stats_df[stat],
+                            mode='lines',
+                            name=stat,
+                            line=dict(width=3, dash='solid' if stat in ['Mean', 'Median'] else 'dot'),
+                            fill='tonexty' if i == 1 else None,  # Fill between second trace and previous
+                            fillcolor='rgba(0, 100, 255, 0.2)'  # Transparent blue fill
+                        ))
+            elif len(selected_stats) == 1:
+                stat = selected_stats[0]
                 if stat in stats_df.columns:
                     fig_time.add_trace(go.Scatter(
                         x=stats_df['Forecast_Datetime'],
@@ -120,6 +140,7 @@ if csv_files:
                         name=stat,
                         line=dict(width=3, dash='solid' if stat in ['Mean', 'Median'] else 'dot')
                     ))
+            
             fig_time.update_layout(
                 title=f"MSLP Time Series (Date: {selected_date})",
                 xaxis_title="Date",
@@ -164,7 +185,7 @@ if csv_files:
                 height=800  # Larger map
             )
             fig_map.update_geos(
-                lataxis_range=[0, 25],  # South China Sea: 0-25°N
+                lataxis_range=[0, 30],  # South China Sea: 0-30°N
                 lonaxis_range=[100, 125]  # 100-125°E
             )
             st.plotly_chart(fig_map, use_container_width=True)
