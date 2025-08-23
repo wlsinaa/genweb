@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from google.cloud import storage
 from datetime import datetime, timedelta
 import os
@@ -22,16 +23,14 @@ def list_csv_files():
     try:
         bucket = client.get_bucket(bucket_name)
         blobs = bucket.list_blobs(prefix=prefix)
-        # Match files like mslp_%Y%m%d12.csv or mslp_%Y%m%d00.csv
         pattern = r"mslp_\d{8}(12|00)\.csv$"
         csv_files = [blob.name for blob in blobs if re.match(pattern, blob.name.split('/')[-1])]
-        # Extract dates from file names (e.g., 2023071312 -> 2023-07-13 12:00)
         dates = []
         for file in csv_files:
             date_str = file.split('/')[-1].replace('mslp_', '').replace('.csv', '')
             date = datetime.strptime(date_str, '%Y%m%d%H')
             dates.append((file, date.strftime('%Y-%m-%d %H:%M')))
-        return sorted(dates, key=lambda x: x[1])  # Sort by date
+        return sorted(dates, key=lambda x: x[1])
     except Exception as e:
         st.error(f"Error listing files from GCS: {e}")
         return []
@@ -60,9 +59,6 @@ if csv_files:
     selected_date = st.sidebar.selectbox("Select Date", options=date_options)
     selected_file = next(file for file, date in csv_files if date == selected_date)
     
-    # Aggregation method selection
-    agg_method = st.sidebar.selectbox("Aggregation Method", options=["Mean", "Median", "25th Percentile", "75th Percentile"])
-    
     # Sample selection
     df = load_data(selected_file)
     if df is not None:
@@ -84,24 +80,40 @@ if csv_files:
         filtered_df = df[df['Sample'].isin(selected_samples)]
         
         if not filtered_df.empty:
-            # Aggregate MSLP based on selected method
-            if agg_method == "Mean":
-                agg_df = filtered_df.groupby(['Forecast_Datetime', 'Sample'])['MSLP'].mean().reset_index()
-                agg_label = "Mean MSLP"
-            elif agg_method == "Median":
-                agg_df = filtered_df.groupby(['Forecast_Datetime', 'Sample'])['MSLP'].median().reset_index()
-                agg_label = "Median MSLP"
-            elif agg_method == "25th Percentile":
-                agg_df = filtered_df.groupby(['Forecast_Datetime', 'Sample'])['MSLP'].quantile(0.25).reset_index()
-                agg_label = "25th Percentile MSLP"
-            else:  # 75th Percentile
-                agg_df = filtered_df.groupby(['Forecast_Datetime', 'Sample'])['MSLP'].quantile(0.75).reset_index()
-                agg_label = "75th Percentile MSLP"
+            # Aggregate MSLP across all lat/lon for each sample and time step
+            sample_df = filtered_df.groupby(['Forecast_Datetime', 'Sample'])['MSLP'].mean().reset_index()
             
-            # Plot time series for all selected samples
-            fig = px.line(agg_df, x='Forecast_Datetime', y='MSLP', color='Sample',
-                          title=f"{agg_label} Time Series (Selected Samples, Date: {selected_date})",
-                          labels={'Forecast_Datetime': 'Date', 'MSLP': f'{agg_label} (Pa)'})
+            # Calculate statistics across selected samples for each Forecast_Datetime
+            stats_df = filtered_df.groupby('Forecast_Datetime')['MSLP'].agg(['mean', 'median', lambda x: x.quantile(0.25), lambda x: x.quantile(0.75)]).reset_index()
+            stats_df.columns = ['Forecast_Datetime', 'Mean', 'Median', '25th Percentile', '75th Percentile']
+            
+            # Create Plotly figure
+            fig = go.Figure()
+            
+            # Plot individual samples
+            for sample in selected_samples:
+                sample_data = sample_df[sample_df['Sample'] == sample]
+                fig.add_trace(go.Scatter(
+                    x=sample_data['Forecast_Datetime'],
+                    y=sample_data['MSLP'],
+                    mode='lines',
+                    name=f'Sample {sample}',
+                    line=dict(dash='dash')
+                ))
+            
+            # Plot aggregated statistics
+            fig.add_trace(go.Scatter(x=stats_df['Forecast_Datetime'], y=stats_df['Mean'], mode='lines', name='Mean', line=dict(color='red', width=3)))
+            fig.add_trace(go.Scatter(x=stats_df['Forecast_Datetime'], y=stats_df['Median'], mode='lines', name='Median', line=dict(color='green', width=3)))
+            fig.add_trace(go.Scatter(x=stats_df['Forecast_Datetime'], y=stats_df['25th Percentile'], mode='lines', name='25th Percentile', line=dict(color='blue', width=2, dash='dot')))
+            fig.add_trace(go.Scatter(x=stats_df['Forecast_Datetime'], y=stats_df['75th Percentile'], mode='lines', name='75th Percentile', line=dict(color='purple', width=2, dash='dot')))
+            
+            fig.update_layout(
+                title=f"MSLP Time Series with Statistics (Date: {selected_date})",
+                xaxis_title="Date",
+                yaxis_title="MSLP (Pa)",
+                showlegend=True,
+                hovermode="x unified"
+            )
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.warning("No data available for the selected samples.")
