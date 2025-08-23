@@ -66,10 +66,10 @@ if csv_files:
         selected_samples = st.sidebar.multiselect("Select Samples", options=all_samples, default=all_samples)
         
         # Statistics selection for time series (restricted to two options)
-        stat_options = ["25th Percentile", "75th Percentile"]  # Restricted to spread visualization
+        stat_options = ["Mean", "Median", "25th Percentile", "75th Percentile"]  # Restricted to spread visualization
         selected_stats = st.sidebar.multiselect("Select Statistics to Plot (Max 2)", 
                                                options=stat_options, 
-                                               default=stat_options, 
+                                               default=["25th Percentile", "75th Percentile"], 
                                                max_selections=2)
         
         # Latitude and Longitude filters for map
