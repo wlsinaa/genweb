@@ -65,7 +65,7 @@ if csv_files:
         all_samples = sorted(df['Sample'].unique())
         selected_samples = st.sidebar.multiselect("Select Samples", options=all_samples, default=all_samples)
         
-        # Statistics selection
+        # Statistics selection for time series
         stat_options = ["Mean", "Median", "25th Percentile", "75th Percentile"]
         selected_stats = st.sidebar.multiselect("Select Statistics to Plot", options=stat_options, default=[])
         
@@ -131,8 +131,7 @@ if csv_files:
             
             # Map Plot with Lines
             st.subheader("MSLP Time Series Map (South China Sea)")
-            # Aggregate MSLP by lat/lon, sample, and forecast datetime
-            map_df = filtered_df.groupby(['Latitude', 'Longitude', 'Sample', 'Forecast_Datetime'])['MSLP'].mean().reset_index()
+            map_df = filtered_df.sort_values('Forecast_Datetime')  # Ensure chronological order
             
             # Create Mapbox figure
             fig_map = go.Figure()
@@ -140,7 +139,7 @@ if csv_files:
             # Add lines for each sample at each lat/lon
             for sample in selected_samples:
                 sample_data = map_df[map_df['Sample'] == sample]
-                # Group by lat/lon to plot lines for each coordinate
+                # Group by lat/lon to plot lines
                 for (lat, lon) in sample_data[['Latitude', 'Longitude']].drop_duplicates().values:
                     coord_data = sample_data[(sample_data['Latitude'] == lat) & (sample_data['Longitude'] == lon)]
                     fig_map.add_trace(go.Scattermapbox(
@@ -148,8 +147,8 @@ if csv_files:
                         lon=coord_data['Longitude'],
                         mode='lines+markers',
                         name=f'Sample {sample} (Lat: {lat}, Lon: {lon})',
-                        line=dict(width=2),
-                        marker=dict(size=8, color=coord_data['MSLP'], colorscale='Viridis', showscale=True),
+                        line=dict(width=2, color='blue'),  # Fixed color for simplicity
+                        marker=dict(size=8, color='blue', showscale=False),  # No color bar
                         text=coord_data['MSLP'].round(2),
                         hoverinfo='text+lat+lon'
                     ))
@@ -160,13 +159,13 @@ if csv_files:
                     style="open-street-map",  # Modern Mapbox style
                     center=dict(lat=12.5, lon=112.5),  # Center of South China Sea
                     zoom=4,  # Adjust for larger view
-                    uirevision='static'  # Preserve zoom/pan state
+                    uirevision='static'  # Preserve zoom/pan
                 ),
                 showlegend=True,
                 height=800  # Larger map
             )
             fig_map.update_geos(
-                lataxis_range=[0, 25],  # South China Sea: 0-25°N
+                lataxis_range=[0, 30],  # South China Sea: 0-25°N
                 lonaxis_range=[100, 125]  # 100-125°E
             )
             st.plotly_chart(fig_map, use_container_width=True)
