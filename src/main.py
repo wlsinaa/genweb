@@ -129,24 +129,45 @@ if csv_files:
             )
             st.plotly_chart(fig_time, use_container_width=True)
             
-            # Map Plot
-            st.subheader("MSLP Map (South China Sea)")
-            map_df = filtered_df.groupby(['Latitude', 'Longitude', 'Sample'])['MSLP'].mean().reset_index()
-            fig_map = px.scatter_geo(map_df,
-                                     lat='Latitude',
-                                     lon='Longitude',
-                                     color='MSLP',
-                                     color_continuous_scale='Viridis',
-                                     size_max=15,
-                                     title=f"MSLP Map (Date: {selected_date}, Samples: {len(selected_samples)})",
-                                     projection="mercator")
+            # Map Plot with Lines
+            st.subheader("MSLP Time Series Map (South China Sea)")
+            # Aggregate MSLP by lat/lon, sample, and forecast datetime
+            map_df = filtered_df.groupby(['Latitude', 'Longitude', 'Sample', 'Forecast_Datetime'])['MSLP'].mean().reset_index()
+            
+            # Create Mapbox figure
+            fig_map = go.Figure()
+            
+            # Add lines for each sample at each lat/lon
+            for sample in selected_samples:
+                sample_data = map_df[map_df['Sample'] == sample]
+                # Group by lat/lon to plot lines for each coordinate
+                for (lat, lon) in sample_data[['Latitude', 'Longitude']].drop_duplicates().values:
+                    coord_data = sample_data[(sample_data['Latitude'] == lat) & (sample_data['Longitude'] == lon)]
+                    fig_map.add_trace(go.Scattermapbox(
+                        lat=coord_data['Latitude'],
+                        lon=coord_data['Longitude'],
+                        mode='lines+markers',
+                        name=f'Sample {sample} (Lat: {lat}, Lon: {lon})',
+                        line=dict(width=2),
+                        marker=dict(size=8, color=coord_data['MSLP'], colorscale='Viridis', showscale=True),
+                        text=coord_data['MSLP'].round(2),
+                        hoverinfo='text+lat+lon'
+                    ))
+            
+            fig_map.update_layout(
+                title=f"MSLP Time Series Map (Date: {selected_date}, Samples: {len(selected_samples)})",
+                mapbox=dict(
+                    style="open-street-map",  # Modern Mapbox style
+                    center=dict(lat=12.5, lon=112.5),  # Center of South China Sea
+                    zoom=4,  # Adjust for larger view
+                    uirevision='static'  # Preserve zoom/pan state
+                ),
+                showlegend=True,
+                height=800  # Larger map
+            )
             fig_map.update_geos(
                 lataxis_range=[0, 25],  # South China Sea: 0-25°N
-                lonaxis_range=[100, 125],  # 100-125°E
-                showcountries=True,
-                showcoastlines=True,
-                showland=True,
-                landcolor="rgb(200, 200, 200)"
+                lonaxis_range=[100, 125]  # 100-125°E
             )
             st.plotly_chart(fig_map, use_container_width=True)
         else:
