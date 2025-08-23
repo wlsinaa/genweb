@@ -13,5 +13,5 @@ RUN pip show streamlit google-cloud-storage uvicorn || { echo "Dependency not in
 COPY src/ src/
 COPY .streamlit/ .streamlit/
 ENV PORT=8000
-EXPOSE $PORT
-CMD ["streamlit", "run", "src/main.py", "--server.port", "$PORT", "--server.address", "0.0.0.0"]
+EXPOSE 8000
+CMD ["streamlit", "run", "src/main.py", "--server.port", "8000", "--server.address", "0.0.0.0"]
