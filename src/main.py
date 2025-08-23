@@ -2,11 +2,10 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-from gcloud.aio.storage import Storage
+from google.cloud import storage
 from datetime import datetime, timedelta
 import os
 import re
-import asyncio
 
 # Streamlit page configuration
 st.set_page_config(page_title="Weather MSLP Analysis", layout="wide")
@@ -17,12 +16,13 @@ st.title("🌊 MSLP Analysis: Time Series and South China Sea Map")
 bucket_name = "walter-weather-2"
 prefixes = ["gencast_mslp/", "gefs_mslp/"]
 
-async def list_csv_files_async(prefix):
-    async_client = Storage()
+@st.cache_data
+def list_csv_files(prefix):
+    storage_client = storage.Client()
     try:
-        blobs = await async_client.list_objects(bucket_name, prefix=prefix)
+        blobs = storage_client.list_blobs(bucket_name, prefix=prefix)
         pattern = r"mslp_\d{8}(12|00)\.csv$"
-        csv_files = [blob['name'] for blob in blobs if re.match(pattern, blob['name'].split('/')[-1])]
+        csv_files = [blob.name for blob in blobs if re.match(pattern, blob.name.split('/')[-1])]
         dates = []
         for file in csv_files:
             date_str = file.split('/')[-1].replace('mslp_', '').replace('.csv', '')
@@ -32,18 +32,15 @@ async def list_csv_files_async(prefix):
     except Exception as e:
         st.error(f"Error listing files from GCS: {e}")
         return []
-    finally:
-        await async_client.close()
 
 @st.cache_data
-def list_csv_files(prefix):
-    return asyncio.run(list_csv_files_async(prefix))
-
-async def load_data_async(file_path, dataset):
-    async_client = Storage()
+def load_data(file_path, dataset):
+    storage_client = storage.Client()
     try:
-        data = await async_client.download(bucket_name, file_path)
-        df = pd.read_csv(pd.io.common.StringIO(data.decode('utf-8')))
+        bucket = storage_client.bucket(bucket_name)
+        blob = bucket.blob(file_path)
+        data = blob.download_as_text()
+        df = pd.read_csv(pd.io.common.StringIO(data))
         df['Dataset'] = dataset
         if dataset == "Gencast":
             df['Ensemble'] = df['Sample']
@@ -57,12 +54,6 @@ async def load_data_async(file_path, dataset):
     except Exception as e:
         st.error(f"Error loading data from GCS: {e}")
         return None
-    finally:
-        await async_client.close()
-
-@st.cache_data
-def load_data(file_path, dataset):
-    return asyncio.run(load_data_async(file_path, dataset))
 
 # Sidebar for filtering
 st.sidebar.header("Filter Options")
