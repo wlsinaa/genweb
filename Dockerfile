@@ -12,4 +12,4 @@ COPY src/ src/
 COPY .streamlit/ .streamlit/
 ENV PORT=8000
 EXPOSE 8000
-CMD ["uvicorn", "streamlit.web.server.server:streamlit_app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["streamlit", "run", "src/main.py", "--server.port", "8000", "--server.address", "0.0.0.0"]

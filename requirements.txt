@@ -1,7 +1,5 @@
 streamlit==1.39.0
-google-cloud-storage==2.18.2
-gcloud-aio-storage==7.0.1
+gcloud-aio-storage==7.0.0
 pandas==2.2.3
 plotly==5.24.1
 regex==2024.9.11
-uvicorn==0.30.6
