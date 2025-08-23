@@ -1,6 +1,5 @@
 streamlit==1.39.0
-fastapi==0.115.2  # Optional, if you want to keep FastAPI
-uvicorn==0.32.0   # Optional, if you want to keep FastAPI
 google-cloud-storage==2.18.2
 pandas==2.2.3
 plotly==5.24.1
+regex==2024.9.11
