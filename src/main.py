@@ -17,7 +17,6 @@ st.title("🌊 MSLP Analysis: Time Series and South China Sea Map")
 bucket_name = "walter-weather-2"
 prefixes = ["gencast_mslp/", "gefs_mslp/"]
 
-@st.cache_data
 async def list_csv_files_async(prefix):
     async_client = Storage()
     try:
@@ -109,7 +108,7 @@ if df is not None:
     selected_ensembles = selected_gencast + selected_gefs
     
     # Statistics selection
-    stat_options = ["25th Percentile", "75th Percentile"]
+    stat_options = ["Mean", "Median", "10th Percentile", "25th Percentile", "75th Percentile", "90th Percentile"]
     selected_stats = st.sidebar.multiselect("Select Statistics to Plot (Max 2)", 
                                            options=stat_options, 
                                            default=[], 
