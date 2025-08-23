@@ -15,7 +15,7 @@ st.title("MSLP Time Series from GCS Bucket")
 # Assumes GOOGLE_APPLICATION_CREDENTIALS is set in environment or service account key is provided
 client = storage.Client()
 bucket_name = "walter-weather-2"
-file_path = "walter-weather-2/gencast_mslp/mslp_2023071312.csv"
+file_path = "gencast_mslp/mslp_2023071312.csv"
 
 @st.cache_data
 def load_data():
