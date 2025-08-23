@@ -140,7 +140,6 @@ if csv_files:
             for sample in selected_samples:
                 sample_data = map_df[map_df['Sample'] == sample]
                 for (lat, lon) in sample_data[['Latitude', 'Longitude']].drop_duplicates().values:
-                    coord_data = sample_data[(sample_data['Latitude'] == lat) & (sample_data['Longitude'] == lon)]
                     if len(coord_data['Time_Step'].unique()) > 1:  # Need multiple timestamps
                         fig_map.add_trace(go.Scattermapbox(
                             lat=coord_data['Latitude'],
