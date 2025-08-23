@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 from google.cloud import storage
 from datetime import datetime, timedelta
@@ -65,13 +64,17 @@ if csv_files:
         all_samples = sorted(df['Sample'].unique())
         selected_samples = st.sidebar.multiselect("Select Samples", options=all_samples, default=all_samples)
         
+        # Statistics selection
+        stat_options = ["Mean", "Median", "25th Percentile", "75th Percentile"]
+        selected_stats = st.sidebar.multiselect("Select Statistics to Plot", options=stat_options, default=[])
+        
         # Convert Datetime to datetime object
         df['Datetime'] = pd.to_datetime(df['Datetime'])
         
         # Calculate forecast datetime based on Time_Step
         def calculate_forecast_time(row):
             base_time = row['Datetime']
-            hours_offset = (int(row['Time_Step']) + 1) * 12
+            hours_offset = row['Time_Step'] * 12
             return base_time + timedelta(hours=hours_offset)
         
         df['Forecast_Datetime'] = df.apply(calculate_forecast_time, axis=1)
@@ -101,14 +104,19 @@ if csv_files:
                     line=dict(dash='dash')
                 ))
             
-            # Plot aggregated statistics
-            fig.add_trace(go.Scatter(x=stats_df['Forecast_Datetime'], y=stats_df['Mean'], mode='lines', name='Mean', line=dict(color='red', width=3)))
-            fig.add_trace(go.Scatter(x=stats_df['Forecast_Datetime'], y=stats_df['Median'], mode='lines', name='Median', line=dict(color='green', width=3)))
-            fig.add_trace(go.Scatter(x=stats_df['Forecast_Datetime'], y=stats_df['25th Percentile'], mode='lines', name='25th Percentile', line=dict(color='blue', width=2, dash='dot')))
-            fig.add_trace(go.Scatter(x=stats_df['Forecast_Datetime'], y=stats_df['75th Percentile'], mode='lines', name='75th Percentile', line=dict(color='purple', width=2, dash='dot')))
+            # Plot selected statistics
+            for stat in selected_stats:
+                if stat in stats_df.columns:
+                    fig.add_trace(go.Scatter(
+                        x=stats_df['Forecast_Datetime'],
+                        y=stats_df[stat],
+                        mode='lines',
+                        name=stat,
+                        line=dict(width=3, dash='solid' if stat in ['Mean', 'Median'] else 'dot')
+                    ))
             
             fig.update_layout(
-                title=f"MSLP Time Series with Statistics (Date: {selected_date})",
+                title=f"MSLP Time Series with Selected Statistics (Date: {selected_date})",
                 xaxis_title="Date",
                 yaxis_title="MSLP (Pa)",
                 showlegend=True,
