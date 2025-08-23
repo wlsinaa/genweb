@@ -8,7 +8,7 @@ import os
 import re
 
 # Streamlit page configuration
-st.set_page_config(page_title="Weather MSLP Analysis", layout="wide", theme="light")
+st.set_page_config(page_title="Weather MSLP Analysis", layout="wide")
 
 # Custom CSS for modern UI
 st.markdown("""
