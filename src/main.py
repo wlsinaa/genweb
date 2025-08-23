@@ -128,7 +128,7 @@ if csv_files:
                             name=stat,
                             line=dict(width=3, dash='solid' if stat in ['Mean', 'Median'] else 'dot'),
                             fill='tonexty' if i == 1 else None,  # Fill between second trace and previous
-                            fillcolor='rgba(0, 100, 255, 0.2)'  # Transparent blue fill
+                            fillcolor='rgba(0, 100, 255, 0.5)'  # Transparent blue fill
                         ))
             elif len(selected_stats) == 1:
                 stat = selected_stats[0]
