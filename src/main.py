@@ -8,18 +8,29 @@ import os
 import re
 
 # Streamlit page configuration
-st.set_page_config(page_title="Weather MSLP Analysis", layout="wide")
+st.set_page_config(page_title="Weather MSLP Analysis", layout="wide", theme="light")
+
+# Custom CSS for modern UI
+st.markdown("""
+<style>
+    .main { background-color: #f5f7fa; }
+    .stButton>button { background-color: #007bff; color: white; border-radius: 5px; }
+    .stSelectbox, .stMultiselect { background-color: #ffffff; border-radius: 5px; }
+    .stSlider { background-color: #e9ecef; border-radius: 5px; }
+    h1, h2, h3 { color: #2c3e50; }
+    .sidebar .sidebar-content { background-color: #ffffff; border-right: 1px solid #ddd; }
+</style>
+""", unsafe_allow_html=True)
 
 # Title
-st.title("MSLP Analysis: Time Series and South China Sea Map")
+st.title("🌊 MSLP Analysis: Time Series and South China Sea Map")
 
 # Initialize GCS client
 client = storage.Client()
 bucket_name = "walter-weather-2"
-prefix = "gencast_mslp/"
 
 @st.cache_data
-def list_csv_files():
+def list_csv_files(prefix):
     try:
         bucket = client.get_bucket(bucket_name)
         blobs = bucket.list_blobs(prefix=prefix)
@@ -47,29 +58,46 @@ def load_data(file_path):
         st.error(f"Error loading data from GCS: {e}")
         return None
 
-# List available CSV files
-csv_files = list_csv_files()
+# Sidebar for filtering
+st.sidebar.header("Filter Options")
+
+# Dataset selection
+dataset = st.sidebar.selectbox("Select Dataset", options=["Gencast", "GEFS"])
+
+# List CSV files based on dataset
+prefix = "gencast_mslp/" if dataset == "Gencast" else "gefs_mslp/"
+csv_files = list_csv_files(prefix)
 
 if csv_files:
-    # Sidebar for filtering
-    st.sidebar.header("Filter Options")
-    
     # Date selection
     date_options = [date for _, date in csv_files]
     selected_date = st.sidebar.selectbox("Select Date", options=date_options)
     selected_file = next(file for file, date in csv_files if date == selected_date)
     
-    # Sample selection
+    # Load data
     df = load_data(selected_file)
     if df is not None:
-        all_samples = sorted(df['Sample'].unique())
-        selected_samples = st.sidebar.multiselect("Select Samples", options=all_samples, default=all_samples)
+        # Handle Gencast (Sample, Time_Step) or GEFS (Member, Timestamp)
+        if dataset == "Gencast":
+            ensemble_key = "Sample"
+            time_key = "Time_Step"
+            all_ensembles = sorted(df[ensemble_key].unique())
+            df['Forecast_Datetime'] = df.apply(
+                lambda row: pd.to_datetime(row['Datetime']) + timedelta(hours=row[time_key] * 12), axis=1)
+        else:  # GEFS
+            ensemble_key = "Member"
+            time_key = "Timestamp"
+            all_ensembles = sorted(df[ensemble_key].unique())
+            df['Forecast_Datetime'] = pd.to_datetime(df[time_key])
         
-        # Statistics selection for time series (restricted to two options)
-        stat_options = ["Mean", "Median", "25th Percentile", "75th Percentile"]  # Restricted to spread visualization
+        # Ensemble selection (no default)
+        selected_ensembles = st.sidebar.multiselect(f"Select {ensemble_key}s", options=all_ensembles, default=[])
+        
+        # Statistics selection for time series (max 2)
+        stat_options = ["25th Percentile", "75th Percentile"]
         selected_stats = st.sidebar.multiselect("Select Statistics to Plot (Max 2)", 
                                                options=stat_options, 
-                                               default=["25th Percentile", "75th Percentile"], 
+                                               default=[], 
                                                max_selections=2)
         
         # Latitude and Longitude filters for map
@@ -81,44 +109,31 @@ if csv_files:
                                              min_value=100.0, max_value=125.0, 
                                              value=(100.0, 125.0), step=0.5)
         
-        # Convert Datetime to datetime object
-        df['Datetime'] = pd.to_datetime(df['Datetime'])
-        
-        # Calculate forecast datetime based on Time_Step
-        def calculate_forecast_time(row):
-            base_time = row['Datetime']
-            hours_offset = row['Time_Step'] * 12
-            return base_time + timedelta(hours=hours_offset)
-        
-        df['Forecast_Datetime'] = df.apply(calculate_forecast_time, axis=1)
-        
-        # Filter data by samples and lat/lon
-        filtered_df = df[df['Sample'].isin(selected_samples) & 
+        # Filter data
+        filtered_df = df[df[ensemble_key].isin(selected_ensembles) & 
                         (df['Latitude'].between(lat_min, lat_max)) & 
                         (df['Longitude'].between(lon_min, lon_max))]
         
         if not filtered_df.empty:
             # Time Series Plot
             st.subheader("MSLP Time Series")
-            sample_df = filtered_df.groupby(['Forecast_Datetime', 'Sample'])['MSLP'].mean().reset_index()
+            sample_df = filtered_df.groupby(['Forecast_Datetime', ensemble_key])['MSLP'].mean().reset_index()
             stats_df = filtered_df.groupby('Forecast_Datetime')['MSLP'].agg(['mean', 'median', lambda x: x.quantile(0.25), lambda x: x.quantile(0.75)]).reset_index()
             stats_df.columns = ['Forecast_Datetime', 'Mean', 'Median', '25th Percentile', '75th Percentile']
             
             fig_time = go.Figure()
-            for sample in selected_samples:
-                sample_data = sample_df[sample_df['Sample'] == sample]
+            for ensemble in selected_ensembles:
+                ensemble_data = sample_df[sample_df[ensemble_key] == ensemble]
                 fig_time.add_trace(go.Scatter(
-                    x=sample_data['Forecast_Datetime'],
-                    y=sample_data['MSLP'],
+                    x=ensemble_data['Forecast_Datetime'],
+                    y=ensemble_data['MSLP'],
                     mode='lines',
-                    name=f'Sample {sample}',
+                    name=f'{ensemble_key} {ensemble}',
                     line=dict(dash='dash')
                 ))
             
-            # Plot statistics with filled area between them
             if len(selected_stats) == 2:
-                # Ensure 75th Percentile is plotted second for fill
-                ordered_stats = sorted(selected_stats, key=lambda x: x if x != '25th Percentile' else 'z')  # Ensure 25th is first
+                ordered_stats = sorted(selected_stats, key=lambda x: x if x != '25th Percentile' else 'z')
                 for i, stat in enumerate(ordered_stats):
                     if stat in stats_df.columns:
                         fig_time.add_trace(go.Scatter(
@@ -127,8 +142,8 @@ if csv_files:
                             mode='lines',
                             name=stat,
                             line=dict(width=3, dash='solid' if stat in ['Mean', 'Median'] else 'dot'),
-                            fill='tonexty' if i == 1 else None,  # Fill between second trace and previous
-                            fillcolor='rgba(0, 100, 255, 0.5)'  # Transparent blue fill
+                            fill='tonexty' if i == 1 else None,
+                            fillcolor='rgba(0, 100, 255, 0.2)'
                         ))
             elif len(selected_stats) == 1:
                 stat = selected_stats[0]
@@ -142,56 +157,54 @@ if csv_files:
                     ))
             
             fig_time.update_layout(
-                title=f"MSLP Time Series (Date: {selected_date})",
+                title=f"MSLP Time Series (Dataset: {dataset}, Date: {selected_date})",
                 xaxis_title="Date",
                 yaxis_title="MSLP (Pa)",
                 showlegend=True,
-                hovermode="x unified"
+                hovermode="x unified",
+                template="plotly_white"
             )
             st.plotly_chart(fig_time, use_container_width=True)
             
             # Map Plot with Lines
             st.subheader("MSLP Time Series Map (South China Sea)")
-            map_df = filtered_df.sort_values('Forecast_Datetime')  # Ensure chronological order
+            map_df = filtered_df.sort_values('Forecast_Datetime')
             
-            # Create Mapbox figure
             fig_map = go.Figure()
-            
-            # Add lines for each sample, connecting (lat, lon) across timestamps
-            for sample in selected_samples:
-                sample_data = map_df[map_df['Sample'] == sample].sort_values('Forecast_Datetime')
-                if len(sample_data['Time_Step'].unique()) > 1:  # Need multiple timestamps
+            for ensemble in selected_ensembles:
+                ensemble_data = map_df[map_df[ensemble_key] == ensemble].sort_values('Forecast_Datetime')
+                if len(ensemble_data['Forecast_Datetime'].unique()) > 1:
                     fig_map.add_trace(go.Scattermapbox(
-                        lat=sample_data['Latitude'],
-                        lon=sample_data['Longitude'],
-                        mode='lines',  # Lines only
-                        name=f'Sample {sample}',
+                        lat=ensemble_data['Latitude'],
+                        lon=ensemble_data['Longitude'],
+                        mode='lines',
+                        name=f'{ensemble_key} {ensemble}',
                         line=dict(width=2, color='blue'),
-                        text=[f"MSLP: {mslp:.2f} Pa, Time: {dt}" for mslp, dt in zip(sample_data['MSLP'], sample_data['Forecast_Datetime'])],
+                        text=[f"MSLP: {mslp:.2f} Pa, Time: {dt}" for mslp, dt in zip(ensemble_data['MSLP'], ensemble_data['Forecast_Datetime'])],
                         hoverinfo='text+lat+lon'
                     ))
                 else:
-                    st.warning(f"No lines plotted for Sample {sample} (only {len(sample_data['Time_Step'].unique())} timestamp available).")
+                    st.warning(f"No lines plotted for {ensemble_key} {ensemble} (only {len(ensemble_data['Forecast_Datetime'].unique())} timestamp available).")
             
             fig_map.update_layout(
-                title=f"MSLP Time Series Map (Date: {selected_date}, Samples: {len(selected_samples)})",
+                title=f"MSLP Time Series Map (Dataset: {dataset}, Date: {selected_date}, {ensemble_key}s: {len(selected_ensembles)})",
                 mapbox=dict(
-                    style="open-street-map",  # Modern Mapbox style
-                    center=dict(lat=12.5, lon=112.5),  # Center of South China Sea
-                    zoom=4,  # Larger view
-                    uirevision='static'  # Preserve zoom/pan
+                    style="open-street-map",
+                    center=dict(lat=12.5, lon=112.5),
+                    zoom=4,
+                    uirevision='static'
                 ),
                 showlegend=True,
-                height=800  # Larger map
+                height=800
             )
             fig_map.update_geos(
-                lataxis_range=[0, 30],  # South China Sea: 0-30°N
-                lonaxis_range=[100, 125]  # 100-125°E
+                lataxis_range=[0, 25],
+                lonaxis_range=[100, 125]
             )
             st.plotly_chart(fig_map, use_container_width=True)
         else:
-            st.warning("No data available for the selected samples and lat/lon ranges.")
+            st.warning(f"No data available for the selected {ensemble_key}s and lat/lon ranges.")
     else:
         st.error("Failed to load data for the selected date. Check GCS bucket permissions or file path.")
 else:
-    st.error("No matching CSV files found in GCS bucket. Check bucket and file path.")
+    st.error(f"No matching CSV files found in GCS bucket for {dataset}. Check bucket and file path.")
