@@ -14,13 +14,12 @@ st.set_page_config(page_title="Weather MSLP Analysis", layout="wide")
 # Title
 st.title("🌊 MSLP Analysis: Time Series and South China Sea Map")
 
-# Initialize async GCS client
-async_client = Storage()
 bucket_name = "walter-weather-2"
 prefixes = ["gencast_mslp/", "gefs_mslp/"]
 
 @st.cache_data
 async def list_csv_files_async(prefix):
+    async_client = Storage()
     try:
         blobs = await async_client.list_objects(bucket_name, prefix=prefix)
         pattern = r"mslp_\d{8}(12|00)\.csv$"
@@ -34,12 +33,15 @@ async def list_csv_files_async(prefix):
     except Exception as e:
         st.error(f"Error listing files from GCS: {e}")
         return []
+    finally:
+        await async_client.close()
 
 @st.cache_data
 def list_csv_files(prefix):
     return asyncio.run(list_csv_files_async(prefix))
 
 async def load_data_async(file_path, dataset):
+    async_client = Storage()
     try:
         data = await async_client.download(bucket_name, file_path)
         df = pd.read_csv(pd.io.common.StringIO(data.decode('utf-8')))
@@ -56,6 +58,8 @@ async def load_data_async(file_path, dataset):
     except Exception as e:
         st.error(f"Error loading data from GCS: {e}")
         return None
+    finally:
+        await async_client.close()
 
 @st.cache_data
 def load_data(file_path, dataset):
