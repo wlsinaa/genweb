@@ -2,10 +2,13 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-from google.cloud import storage
+from google.cloud.storage import Client
+from google.cloud.storage.aio import Storage
 from datetime import datetime, timedelta
 import os
 import re
+import asyncio
+import aiohttp
 
 # Streamlit page configuration
 st.set_page_config(page_title="Weather MSLP Analysis", layout="wide")
@@ -13,15 +16,17 @@ st.set_page_config(page_title="Weather MSLP Analysis", layout="wide")
 # Title
 st.title("🌊 MSLP Analysis: Time Series and South China Sea Map")
 
-# Initialize GCS client
-client = storage.Client()
+# Initialize GCS clients
+sync_client = Client()
+async_client = Storage()
+
 bucket_name = "walter-weather-2"
 prefixes = ["gencast_mslp/", "gefs_mslp/"]
 
 @st.cache_data
 def list_csv_files(prefix):
     try:
-        bucket = client.get_bucket(bucket_name)
+        bucket = sync_client.get_bucket(bucket_name)
         blobs = bucket.list_blobs(prefix=prefix)
         pattern = r"mslp_\d{8}(12|00)\.csv$"
         csv_files = [blob.name for blob in blobs if re.match(pattern, blob.name.split('/')[-1])]
@@ -35,17 +40,29 @@ def list_csv_files(prefix):
         st.error(f"Error listing files from GCS: {e}")
         return []
 
-@st.cache_data
-def load_data(file_path):
+async def load_data_async(file_path, dataset):
     try:
-        bucket = client.get_bucket(bucket_name)
-        blob = bucket.blob(file_path)
-        data = blob.download_as_string()
+        bucket = await async_client.get_bucket(bucket_name)
+        blob = bucket.get_blob(file_path)
+        data = await blob.download_as_bytes()
         df = pd.read_csv(pd.io.common.StringIO(data.decode('utf-8')))
+        df['Dataset'] = dataset
+        if dataset == "Gencast":
+            df['Ensemble'] = df['Sample']
+            df['Forecast_Datetime'] = df.apply(
+                lambda row: pd.to_datetime(row['Datetime']) + timedelta(hours=row['Time_Step'] * 12), axis=1)
+            df['MSLP'] = df['MSLP'] / 1000  # Convert to hPa
+        else:  # GEFS
+            df['Ensemble'] = df['Member']
+            df['Forecast_Datetime'] = pd.to_datetime(df['Timestamp'])
         return df
     except Exception as e:
         st.error(f"Error loading data from GCS: {e}")
         return None
+
+@st.cache_data
+def load_data(file_path, dataset):
+    return asyncio.run(load_data_async(file_path, dataset))
 
 # Sidebar for filtering
 st.sidebar.header("Filter Options")
@@ -53,33 +70,23 @@ st.sidebar.header("Filter Options")
 # Date selection
 all_dates = set()
 for prefix in prefixes:
-    dataset = prefix.split('_')[0].capitalize()
     csv_files = list_csv_files(prefix)
     all_dates.update(date for _, date in csv_files)
 
 date_options = sorted(list(all_dates))
 selected_date = st.sidebar.selectbox("Select Date", options=date_options)
 
-# Load data for both datasets
+# Load data for selected date
 gencast_df = None
 gefs_df = None
-for prefix in prefixes:
-    dataset = prefix.split('_')[0].capitalize()
-    csv_files = list_csv_files(prefix)
-    selected_file = next((file for file, date in csv_files if date == selected_date), None)
+for prefix, dataset in zip(prefixes, ["Gencast", "GEFS"]):
+    selected_file = next((file for file, date in list_csv_files(prefix) if date == selected_date), None)
     if selected_file:
-        df = load_data(selected_file)
+        df = load_data(selected_file, dataset)
         if df is not None:
             if dataset == "Gencast":
-                df['Dataset'] = "Gencast"
-                df['Ensemble'] = df['Sample']
-                df['Forecast_Datetime'] = df.apply(
-                    lambda row: pd.to_datetime(row['Datetime']) + timedelta(hours=row['Time_Step'] * 12), axis=1)
                 gencast_df = df
-            else:  # GEFS
-                df['Dataset'] = "GEFS"
-                df['Ensemble'] = df['Member']
-                df['Forecast_Datetime'] = pd.to_datetime(df['Timestamp'])
+            else:
                 gefs_df = df
 
 # Combine datasets
@@ -93,18 +100,21 @@ else:
     df = None
 
 if df is not None:
-    # Ensemble selection (no default)
-    all_ensembles = sorted(df['Ensemble'].unique())
-    selected_ensembles = st.sidebar.multiselect("Select Ensembles", options=all_ensembles, default=[])
+    # Separate ensemble selection
+    gencast_ensembles = sorted(gencast_df['Ensemble'].unique()) if gencast_df is not None else []
+    gefs_ensembles = sorted(gefs_df['Ensemble'].unique()) if gefs_df is not None else []
+    selected_gencast = st.sidebar.multiselect("Select Gencast Samples", options=gencast_ensembles, default=[])
+    selected_gefs = st.sidebar.multiselect("Select GEFS Members", options=gefs_ensembles, default=[])
+    selected_ensembles = selected_gencast + selected_gefs
     
-    # Statistics selection for time series (max 2)
+    # Statistics selection
     stat_options = ["25th Percentile", "75th Percentile"]
     selected_stats = st.sidebar.multiselect("Select Statistics to Plot (Max 2)", 
                                            options=stat_options, 
                                            default=[], 
                                            max_selections=2)
     
-    # Latitude and Longitude filters for map
+    # Latitude and Longitude filters
     st.sidebar.subheader("Map Filters (South China Sea)")
     lat_min, lat_max = st.sidebar.slider("Latitude Range (0-25°N)", 
                                          min_value=0.0, max_value=25.0, 
@@ -164,7 +174,7 @@ if df is not None:
         fig_time.update_layout(
             title=f"MSLP Time Series (Date: {selected_date})",
             xaxis_title="Date",
-            yaxis_title="MSLP (Pa)",
+            yaxis_title="MSLP (hPa)",
             showlegend=True,
             hovermode="x unified",
             template="plotly_white"
@@ -186,7 +196,7 @@ if df is not None:
                     mode='lines',
                     name=f'{dataset} Ensemble {ensemble}',
                     line=dict(width=2, color='blue' if dataset == 'Gencast' else 'red'),
-                    text=[f"MSLP: {mslp:.2f} Pa, Time: {dt}" for mslp, dt in zip(ensemble_data['MSLP'], ensemble_data['Forecast_Datetime'])],
+                    text=[f"MSLP: {mslp:.2f} hPa, Time: {dt}" for mslp, dt in zip(ensemble_data['MSLP'], ensemble_data['Forecast_Datetime'])],
                     hoverinfo='text+lat+lon'
                 ))
             else:
