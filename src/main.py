@@ -95,6 +95,11 @@ if csv_files:
                         (df['Longitude'].between(lon_min, lon_max))]
         
         if not filtered_df.empty:
+            # Debug: Check number of timestamps per sample and coordinate
+            debug_df = filtered_df.groupby(['Sample', 'Latitude', 'Longitude'])['Time_Step'].count().reset_index()
+            st.write("Debug: Number of Time_Step values per Sample and Coordinate")
+            st.dataframe(debug_df)
+            
             # Time Series Plot
             st.subheader("MSLP Time Series")
             sample_df = filtered_df.groupby(['Forecast_Datetime', 'Sample'])['MSLP'].mean().reset_index()
@@ -139,33 +144,34 @@ if csv_files:
             # Add lines for each sample at each lat/lon
             for sample in selected_samples:
                 sample_data = map_df[map_df['Sample'] == sample]
-                # Group by lat/lon to plot lines
                 for (lat, lon) in sample_data[['Latitude', 'Longitude']].drop_duplicates().values:
                     coord_data = sample_data[(sample_data['Latitude'] == lat) & (sample_data['Longitude'] == lon)]
-                    fig_map.add_trace(go.Scattermapbox(
-                        lat=coord_data['Latitude'],
-                        lon=coord_data['Longitude'],
-                        mode='lines+markers',
-                        name=f'Sample {sample} (Lat: {lat}, Lon: {lon})',
-                        line=dict(width=2, color='blue'),  # Fixed color for simplicity
-                        marker=dict(size=8, color='blue', showscale=False),  # No color bar
-                        text=coord_data['MSLP'].round(2),
-                        hoverinfo='text+lat+lon'
-                    ))
+                    if len(coord_data) > 1:  # Only plot lines with multiple timestamps
+                        fig_map.add_trace(go.Scattermapbox(
+                            lat=coord_data['Latitude'],
+                            lon=coord_data['Longitude'],
+                            mode='lines',  # Lines only
+                            name=f'Sample {sample} (Lat: {lat}, Lon: {lon})',
+                            line=dict(width=2, color='blue'),
+                            text=[f"MSLP: {mslp:.2f} Pa, Time: {dt}" for mslp, dt in zip(coord_data['MSLP'], coord_data['Forecast_Datetime'])],
+                            hoverinfo='text+lat+lon'
+                        ))
+                    else:
+                        st.warning(f"No lines plotted for Sample {sample} at Lat: {lat}, Lon: {lon} (only {len(coord_data)} timestamp available).")
             
             fig_map.update_layout(
                 title=f"MSLP Time Series Map (Date: {selected_date}, Samples: {len(selected_samples)})",
                 mapbox=dict(
                     style="open-street-map",  # Modern Mapbox style
                     center=dict(lat=12.5, lon=112.5),  # Center of South China Sea
-                    zoom=4,  # Adjust for larger view
+                    zoom=4,  # Larger view
                     uirevision='static'  # Preserve zoom/pan
                 ),
                 showlegend=True,
                 height=800  # Larger map
             )
             fig_map.update_geos(
-                lataxis_range=[0, 30],  # South China Sea: 0-25°N
+                lataxis_range=[0, 25],  # South China Sea: 0-25°N
                 lonaxis_range=[100, 125]  # 100-125°E
             )
             st.plotly_chart(fig_map, use_container_width=True)
