@@ -95,11 +95,6 @@ if csv_files:
                         (df['Longitude'].between(lon_min, lon_max))]
         
         if not filtered_df.empty:
-            # Debug: Check number of timestamps per sample and coordinate
-            debug_df = filtered_df.groupby(['Sample', 'Latitude', 'Longitude'])['Time_Step'].count().reset_index()
-            st.write("Debug: Number of Time_Step values per Sample and Coordinate")
-            st.dataframe(debug_df)
-            
             # Time Series Plot
             st.subheader("MSLP Time Series")
             sample_df = filtered_df.groupby(['Forecast_Datetime', 'Sample'])['MSLP'].mean().reset_index()
@@ -141,23 +136,29 @@ if csv_files:
             # Create Mapbox figure
             fig_map = go.Figure()
             
-            # Add lines for each sample at each lat/lon
+            # Add lines for each sample within lat/lon ranges
+            lat_lon_range = 0.5  # ±0.5° range for grouping coordinates
             for sample in selected_samples:
                 sample_data = map_df[map_df['Sample'] == sample]
-                for (lat, lon) in sample_data[['Latitude', 'Longitude']].drop_duplicates().values:
-                    coord_data = sample_data[(sample_data['Latitude'] == lat) & (sample_data['Longitude'] == lon)]
-                    if len(coord_data) > 1:  # Only plot lines with multiple timestamps
+                unique_coords = sample_data[['Latitude', 'Longitude']].drop_duplicates().values
+                for lat, lon in unique_coords:
+                    # Filter within ±0.5° of the coordinate
+                    coord_data = sample_data[
+                        (sample_data['Latitude'].between(lat - lat_lon_range, lat + lat_lon_range)) &
+                        (sample_data['Longitude'].between(lon - lon_lon_range, lon + lon_lon_range))
+                    ]
+                    if len(coord_data['Time_Step'].unique()) > 1:  # Need multiple timestamps
                         fig_map.add_trace(go.Scattermapbox(
                             lat=coord_data['Latitude'],
                             lon=coord_data['Longitude'],
                             mode='lines',  # Lines only
-                            name=f'Sample {sample} (Lat: {lat}, Lon: {lon})',
+                            name=f'Sample {sample} (Lat: {lat:.2f}, Lon: {lon:.2f})',
                             line=dict(width=2, color='blue'),
                             text=[f"MSLP: {mslp:.2f} Pa, Time: {dt}" for mslp, dt in zip(coord_data['MSLP'], coord_data['Forecast_Datetime'])],
                             hoverinfo='text+lat+lon'
                         ))
                     else:
-                        st.warning(f"No lines plotted for Sample {sample} at Lat: {lat}, Lon: {lon} (only {len(coord_data)} timestamp available).")
+                        st.warning(f"No lines plotted for Sample {sample} near Lat: {lat:.2f}, Lon: {lon:.2f} (only {len(coord_data['Time_Step'].unique())} timestamp available).")
             
             fig_map.update_layout(
                 title=f"MSLP Time Series Map (Date: {selected_date}, Samples: {len(selected_samples)})",
