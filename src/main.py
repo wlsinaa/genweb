@@ -8,7 +8,6 @@ from datetime import datetime, timedelta
 import os
 import re
 import asyncio
-import aiohttp
 
 # Streamlit page configuration
 st.set_page_config(page_title="Weather MSLP Analysis", layout="wide")
