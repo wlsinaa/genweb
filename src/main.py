@@ -136,22 +136,21 @@ if csv_files:
             # Create Mapbox figure
             fig_map = go.Figure()
             
-            # Add lines for each sample at each exact lat/lon
+            # Add lines for each sample, connecting (lat, lon) across timestamps
             for sample in selected_samples:
-                sample_data = map_df[map_df['Sample'] == sample]
-                for (lat, lon) in sample_data[['Latitude', 'Longitude']].drop_duplicates().values:
-                    if len(coord_data['Time_Step'].unique()) > 1:  # Need multiple timestamps
-                        fig_map.add_trace(go.Scattermapbox(
-                            lat=coord_data['Latitude'],
-                            lon=coord_data['Longitude'],
-                            mode='lines',  # Lines only
-                            name=f'Sample {sample} (Lat: {lat:.2f}, Lon: {lon:.2f})',
-                            line=dict(width=2, color='blue'),
-                            text=[f"MSLP: {mslp:.2f} Pa, Time: {dt}" for mslp, dt in zip(coord_data['MSLP'], coord_data['Forecast_Datetime'])],
-                            hoverinfo='text+lat+lon'
-                        ))
-                    else:
-                        st.warning(f"No lines plotted for Sample {sample} at Lat: {lat:.2f}, Lon: {lon:.2f} (only {len(coord_data['Time_Step'].unique())} timestamp available).")
+                sample_data = map_df[map_df['Sample'] == sample].sort_values('Forecast_Datetime')
+                if len(sample_data['Time_Step'].unique()) > 1:  # Need multiple timestamps
+                    fig_map.add_trace(go.Scattermapbox(
+                        lat=sample_data['Latitude'],
+                        lon=sample_data['Longitude'],
+                        mode='lines',  # Lines only
+                        name=f'Sample {sample}',
+                        line=dict(width=2, color='blue'),
+                        text=[f"MSLP: {mslp:.2f} Pa, Time: {dt}" for mslp, dt in zip(sample_data['MSLP'], sample_data['Forecast_Datetime'])],
+                        hoverinfo='text+lat+lon'
+                    ))
+                else:
+                    st.warning(f"No lines plotted for Sample {sample} (only {len(sample_data['Time_Step'].unique())} timestamp available).")
             
             fig_map.update_layout(
                 title=f"MSLP Time Series Map (Date: {selected_date}, Samples: {len(selected_samples)})",
