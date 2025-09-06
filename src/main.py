@@ -69,25 +69,6 @@ def load_data(file_path, dataset):
         return None
 
 @st.cache_data
-def list_png_files(prefix, base_time):
-    storage_client = storage.Client()
-    try:
-        blobs = storage_client.list_blobs(bucket_name, prefix=prefix)
-        date_str = base_time.replace(' ', '').replace(':', '').replace('-', '')
-        patterns = [f"mslp_comparison_{date_str}.png", f"track_error_{date_str}.png"]
-        png_files = {pattern: None for pattern in patterns}
-        for blob in blobs:
-            blob_name = blob.name.split('/')[-1]
-            for pattern in patterns:
-                if blob_name == pattern:
-                    png_files[pattern] = blob.name
-                    break  # Ensure at most one file per type
-        return png_files
-    except Exception as e:
-        st.error(f"Error listing PNG files from gs://walter-weather-2/plots/: {e}")
-        return {pattern: None for pattern in patterns}
-
-@st.cache_data
 def load_png(file_path):
     storage_client = storage.Client()
     try:
@@ -96,8 +77,7 @@ def load_png(file_path):
         data = blob.download_as_bytes()
         return Image.open(BytesIO(data))
     except Exception as e:
-        st.error(f"Error loading PNG from gs://walter-weather-2/{file_path}: {e}")
-        return None
+        return None  # Return None instead of showing error to avoid cluttering output
 
 # Sidebar for filtering
 st.sidebar.header("Filter Options")
@@ -256,16 +236,12 @@ else:
 # Display PNG Plots
 st.subheader("MSLP Comparison and Track Error Plots")
 date_str = selected_date.replace(' ', '').replace(':', '').replace('-', '')
-png_files = list_png_files("plots/", selected_date)
-for plot_type in [f"mslp_comparison_{date_str}.png", f"track_error_{date_str}.png"]:
-    plot_name = "MSLP Comparison" if "mslp_comparison" in plot_type else "Track Error"
+for plot_type in ["mslp_comparison", "track_error"]:
+    plot_name = "MSLP Comparison" if plot_type == "mslp_comparison" else "Track Error"
     st.write(f"**{plot_name} Plot**")
-    file_path = png_files[plot_type]
-    if file_path:
-        image = load_png(file_path)
-        if image:
-            st.image(image, caption=f"{plot_name} for {selected_date} (gs://walter-weather-2/{file_path})", use_column_width=True)
-        else:
-            st.write("Cannot Extract")
+    file_path = f"plots/{plot_type}_{date_str}.png"
+    image = load_png(file_path)
+    if image:
+        st.image(image, caption=f"{plot_name} for {selected_date}", use_column_width=True)
     else:
         st.write("Cannot Extract")
