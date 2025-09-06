@@ -46,7 +46,7 @@ def load_data(file_path, dataset):
             df['Ensemble'] = df['Sample']
             df['Forecast_Datetime'] = df.apply(
                 lambda row: pd.to_datetime(row['Datetime']) + timedelta(hours=row['Time_Step'] * 12), axis=1)
-            df['MSLP'] = df['MSLP'] / 1000  # Convert to hPa
+            df['MSLP'] = df['MSLP'] / 100  # Convert to hPa
         else:  # GEFS
             df['Ensemble'] = df['Member']
             df['Forecast_Datetime'] = pd.to_datetime(df['Timestamp'])
