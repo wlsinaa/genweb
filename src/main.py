@@ -88,7 +88,8 @@ for prefix, dataset in zip(prefixes, dataset_names):
             dataframes[dataset] = df
 
 # Combine datasets
-df = pd.concat([dataframes[name] for name in dataset_names if dataframes[name] is not None], ignore_index=True) if any(dataframes.values()) else None
+valid_dfs = [dataframes[name] for name in dataset_names if dataframes[name] is not None]
+df = pd.concat(valid_dfs, ignore_index=True) if valid_dfs else None
 
 if df is not None:
     # Ensemble selection
