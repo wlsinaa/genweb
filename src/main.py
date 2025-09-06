@@ -6,6 +6,8 @@ from google.cloud import storage
 from datetime import datetime, timedelta
 import os
 import re
+from io import BytesIO
+from PIL import Image
 
 # Streamlit page configuration
 st.set_page_config(page_title="Weather MSLP Analysis", layout="wide")
@@ -24,7 +26,7 @@ def list_csv_files(prefix):
     try:
         blobs = storage_client.list_blobs(bucket_name, prefix=prefix)
         if prefix == "ifs_mslp/":
-            pattern = r"mslp_data_\d{8}(12|00)\.csv$"
+            pattern = r"mslp_data_\d{8}(12|mediadata:0⁊00)\.csv$"
         else:
             pattern = r"mslp_\d{8}(12|00)\.csv$"
         csv_files = [blob.name for blob in blobs if re.match(pattern, blob.name.split('/')[-1])]
@@ -64,6 +66,36 @@ def load_data(file_path, dataset):
         return df
     except Exception as e:
         st.error(f"Error loading data from GCS: {e}")
+        return None
+
+@st.cache_data
+def list_png_files(prefix, base_time):
+    storage_client = storage.Client()
+    try:
+        blobs = storage_client.list_blobs(bucket_name, prefix=prefix)
+        date_str = base_time.replace(' ', '').replace(':', '').replace('-', '')
+        patterns = [f"mslp_comparison_{date_str}.png", f"track_error_{date_str}.png"]
+        png_files = {pattern: None for pattern in patterns}
+        for blob in blobs:
+            for pattern in patterns:
+                if re.match(pattern, blob.name.split('/')[-1]):
+                    png_files[pattern] = blob.name
+                    break  # Ensure at most one file per type
+        return png_files
+    except Exception as e:
+        st.error(f"Error listing PNG files from GCS: {e}")
+        return {pattern: None for pattern in patterns}
+
+@st.cache_data
+def load_png(file_path):
+    storage_client = storage.Client()
+    try:
+        bucket = storage_client.bucket(bucket_name)
+        blob = bucket.blob(file_path)
+        data = blob.download_as_bytes()
+        return Image.open(BytesIO(data))
+    except Exception as e:
+        st.error(f"Error loading PNG from GCS: {e}")
         return None
 
 # Sidebar for filtering
@@ -215,7 +247,24 @@ if df is not None:
             lonaxis_range=[100, 125]
         )
         st.plotly_chart(fig_map, use_container_width=True)
+
     else:
         st.warning("No data available for the selected ensembles and lat/lon ranges.")
 else:
     st.error(f"No matching CSV files found in GCS bucket for the selected date.")
+
+# Display PNG Plots
+st.subheader("MSLP Comparison and Track Error Plots")
+png_files = list_png_files("plots/", selected_date)
+for plot_type in [f"mslp_comparison_{selected_date.replace(' ', '').replace(':', '').replace('-', '')}.png",
+                  f"track_error_{selected_date.replace(' ', '').replace(':', '').replace('-', '')}.png"]:
+    plot_name = "MSLP Comparison" if "mslp_comparison" in plot_type else "Track Error"
+    st.write(f"**{plot_name} Plot**")
+    if png_files[plot_type]:
+        image = load_png(png_files[plot_type])
+        if image:
+            st.image(image, caption=f"{plot_name} for {selected_date}", use_column_width=True)
+        else:
+            st.write("Cannot Extract")
+    else:
+        st.write("Cannot Extract")
