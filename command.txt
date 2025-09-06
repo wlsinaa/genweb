@@ -1,2 +1,8 @@
 gcloud services enable cloudbuild.googleapis.com artifactregistry.googleapis.com run.googleapis.com
 weather-app-sa
+
+gcloud storage buckets add-iam-policy-binding gs://walter-weather-2 --member="serviceAccount:weather-app-sa@poised-eye-449917-a9.iam.gserviceaccount.com" --role="roles/storage.objectViewer"
+
+gcloud storage buckets add-iam-policy-binding gs://walter-weather-2 --project poised-eye-449917-a9 --member="serviceAccount:weather-app-sa@poised-eye-449917-a9.iam.gserviceaccount.com" --role="roles/storage.viewer"
+
+https://github.com/wlsinaa/genweb/commit/59baa67f6eeb941c6bfa0c64853654bb3ffc419b
