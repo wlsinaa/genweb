@@ -26,7 +26,7 @@ def list_csv_files(prefix):
     try:
         blobs = storage_client.list_blobs(bucket_name, prefix=prefix)
         if prefix == "ifs_mslp/":
-            pattern = r"mslp_data_\d{8}(12|mediadata:0⁊00)\.csv$"
+            pattern = r"mslp_data_\d{8}(12|00)\.csv$"
         else:
             pattern = r"mslp_\d{8}(12|00)\.csv$"
         csv_files = [blob.name for blob in blobs if re.match(pattern, blob.name.split('/')[-1])]
@@ -37,7 +37,7 @@ def list_csv_files(prefix):
             dates.append((file, date.strftime('%Y-%m-%d %H:%M')))
         return sorted(dates, key=lambda x: x[1])
     except Exception as e:
-        st.error(f"Error listing files from GCS: {e}")
+        st.error(f"Error listing CSV files from GCS: {e}")
         return []
 
 @st.cache_data
@@ -77,13 +77,14 @@ def list_png_files(prefix, base_time):
         patterns = [f"mslp_comparison_{date_str}.png", f"track_error_{date_str}.png"]
         png_files = {pattern: None for pattern in patterns}
         for blob in blobs:
+            blob_name = blob.name.split('/')[-1]
             for pattern in patterns:
-                if re.match(pattern, blob.name.split('/')[-1]):
+                if blob_name == pattern:
                     png_files[pattern] = blob.name
                     break  # Ensure at most one file per type
         return png_files
     except Exception as e:
-        st.error(f"Error listing PNG files from GCS: {e}")
+        st.error(f"Error listing PNG files from gs://walter-weather-2/plots/: {e}")
         return {pattern: None for pattern in patterns}
 
 @st.cache_data
@@ -95,7 +96,7 @@ def load_png(file_path):
         data = blob.download_as_bytes()
         return Image.open(BytesIO(data))
     except Exception as e:
-        st.error(f"Error loading PNG from GCS: {e}")
+        st.error(f"Error loading PNG from gs://walter-weather-2/{file_path}: {e}")
         return None
 
 # Sidebar for filtering
@@ -247,7 +248,6 @@ if df is not None:
             lonaxis_range=[100, 125]
         )
         st.plotly_chart(fig_map, use_container_width=True)
-
     else:
         st.warning("No data available for the selected ensembles and lat/lon ranges.")
 else:
@@ -255,15 +255,16 @@ else:
 
 # Display PNG Plots
 st.subheader("MSLP Comparison and Track Error Plots")
+date_str = selected_date.replace(' ', '').replace(':', '').replace('-', '')
 png_files = list_png_files("plots/", selected_date)
-for plot_type in [f"mslp_comparison_{selected_date.replace(' ', '').replace(':', '').replace('-', '')}.png",
-                  f"track_error_{selected_date.replace(' ', '').replace(':', '').replace('-', '')}.png"]:
+for plot_type in [f"mslp_comparison_{date_str}.png", f"track_error_{date_str}.png"]:
     plot_name = "MSLP Comparison" if "mslp_comparison" in plot_type else "Track Error"
     st.write(f"**{plot_name} Plot**")
-    if png_files[plot_type]:
-        image = load_png(png_files[plot_type])
+    file_path = png_files[plot_type]
+    if file_path:
+        image = load_png(file_path)
         if image:
-            st.image(image, caption=f"{plot_name} for {selected_date}", use_column_width=True)
+            st.image(image, caption=f"{plot_name} for {selected_date} (gs://walter-weather-2/{file_path})", use_column_width=True)
         else:
             st.write("Cannot Extract")
     else:
