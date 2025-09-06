@@ -13,21 +13,19 @@ st.set_page_config(page_title="Weather MSLP Analysis", layout="wide")
 # Title
 st.title("🌊 MSLP Analysis: Time Series and South China Sea Map")
 
-# Initialize GCS client
-client = storage.Client()
 bucket_name = "walter-weather-2"
-prefixes = ["gencast_mslp/", "gefs_mslp/", "ifs_mslp/"]
+prefixes = ["gencast_mslp/", "gefs_mslp/"]
 
 @st.cache_data
 def list_csv_files(prefix):
+    storage_client = storage.Client()
     try:
-        bucket = client.get_bucket(bucket_name)
-        blobs = bucket.list_blobs(prefix=prefix)
-        pattern = r"(mslp_\d{8}(12|00)\.csv|mslp_data_\d{8}(12|00)\.csv)$"
+        blobs = storage_client.list_blobs(bucket_name, prefix=prefix)
+        pattern = r"mslp_\d{8}(12|00)\.csv$"
         csv_files = [blob.name for blob in blobs if re.match(pattern, blob.name.split('/')[-1])]
         dates = []
         for file in csv_files:
-            date_str = file.split('/')[-1].replace('mslp_', '').replace('mslp_data_', '').replace('.csv', '')
+            date_str = file.split('/')[-1].replace('mslp_', '').replace('.csv', '')
             date = datetime.strptime(date_str, '%Y%m%d%H')
             dates.append((file, date.strftime('%Y-%m-%d %H:%M')))
         return sorted(dates, key=lambda x: x[1])
@@ -37,26 +35,22 @@ def list_csv_files(prefix):
 
 @st.cache_data
 def load_data(file_path, dataset):
+    storage_client = storage.Client()
     try:
-        bucket = client.get_bucket(bucket_name)
+        bucket = storage_client.bucket(bucket_name)
         blob = bucket.blob(file_path)
-        data = blob.download_as_string()
-        df = pd.read_csv(pd.io.common.StringIO(data.decode('utf-8')))
+        data = blob.download_as_text()
+        df = pd.read_csv(pd.io.common.StringIO(data))
         df['Dataset'] = dataset
         if dataset == "Gencast":
             df['Ensemble'] = df['Sample']
             df['Forecast_Datetime'] = df.apply(
                 lambda row: pd.to_datetime(row['Datetime']) + timedelta(hours=row['Time_Step'] * 12), axis=1)
             df['MSLP'] = df['MSLP'] / 1000  # Convert to hPa
-        elif dataset == "GEFS":
+        else:  # GEFS
             df['Ensemble'] = df['Member']
             df['Forecast_Datetime'] = pd.to_datetime(df['Timestamp'])
-            df['MSLP'] = df['MSLP']  # Assuming MSLP is already in hPa
-        else:  # IFS
-            df['Ensemble'] = "IFS"  # Deterministic model, single ensemble
-            df['Forecast_Datetime'] = pd.to_datetime(df['Datetime'])
-            df['MSLP'] = df['Minimum_MSLP_hPa']  # Already in hPa
-        return df[['Dataset', 'Ensemble', 'Forecast_Datetime', 'MSLP', 'Latitude', 'Longitude']]
+        return df
     except Exception as e:
         st.error(f"Error loading data from GCS: {e}")
         return None
@@ -67,62 +61,51 @@ st.sidebar.header("Filter Options")
 # Date selection
 all_dates = set()
 for prefix in prefixes:
-    dataset = prefix.split('_')[0].capitalize()
     csv_files = list_csv_files(prefix)
     all_dates.update(date for _, date in csv_files)
 
 date_options = sorted(list(all_dates))
 selected_date = st.sidebar.selectbox("Select Date", options=date_options)
 
-# Load data for all datasets
+# Load data for selected date
 gencast_df = None
 gefs_df = None
-ifs_df = None
-for prefix in prefixes:
-    dataset = prefix.split('_')[0].capitalize()
-    csv_files = list_csv_files(prefix)
-    selected_file = next((file for file, date in csv_files if date == selected_date), None)
+for prefix, dataset in zip(prefixes, ["Gencast", "GEFS"]):
+    selected_file = next((file for file, date in list_csv_files(prefix) if date == selected_date), None)
     if selected_file:
         df = load_data(selected_file, dataset)
         if df is not None:
             if dataset == "Gencast":
                 gencast_df = df
-            elif dataset == "GEFS":
+            else:
                 gefs_df = df
-            else:  # IFS
-                ifs_df = df
 
 # Combine datasets
-if gencast_df is not None and gefs_df is not None and ifs_df is not None:
-    df = pd.concat([gencast_df, gefs_df, ifs_df], ignore_index=True)
-elif gencast_df is not None and gefs_df is not None:
+if gencast_df is not None and gefs_df is not None:
     df = pd.concat([gencast_df, gefs_df], ignore_index=True)
-elif gencast_df is not None and ifs_df is not None:
-    df = pd.concat([gencast_df, ifs_df], ignore_index=True)
-elif gefs_df is not None and ifs_df is not None:
-    df = pd.concat([gefs_df, ifs_df], ignore_index=True)
 elif gencast_df is not None:
     df = gencast_df
 elif gefs_df is not None:
     df = gefs_df
-elif ifs_df is not None:
-    df = ifs_df
 else:
     df = None
 
 if df is not None:
-    # Ensemble selection (no default)
-    all_ensembles = sorted(df['Ensemble'].unique())
-    selected_ensembles = st.sidebar.multiselect("Select Ensembles", options=all_ensembles, default=[])
+    # Separate ensemble selection
+    gencast_ensembles = sorted(gencast_df['Ensemble'].unique()) if gencast_df is not None else []
+    gefs_ensembles = sorted(gefs_df['Ensemble'].unique()) if gefs_df is not None else []
+    selected_gencast = st.sidebar.multiselect("Select Gencast Samples", options=gencast_ensembles, default=[])
+    selected_gefs = st.sidebar.multiselect("Select GEFS Members", options=gefs_ensembles, default=[])
+    selected_ensembles = selected_gencast + selected_gefs
     
-    # Statistics selection for time series (max 2)
-    stat_options = ["25th Percentile", "75th Percentile"]
+    # Statistics selection
+    stat_options = ["Mean", "Median", "10th Percentile", "25th Percentile", "75th Percentile", "90th Percentile"]
     selected_stats = st.sidebar.multiselect("Select Statistics to Plot (Max 2)", 
                                            options=stat_options, 
                                            default=[], 
                                            max_selections=2)
     
-    # Latitude and Longitude filters for map
+    # Latitude and Longitude filters
     st.sidebar.subheader("Map Filters (South China Sea)")
     lat_min, lat_max = st.sidebar.slider("Latitude Range (0-25°N)", 
                                          min_value=0.0, max_value=25.0, 
@@ -152,7 +135,7 @@ if df is not None:
                 y=ensemble_data['MSLP'],
                 mode='lines',
                 name=f'{dataset} Ensemble {ensemble}',
-                line=dict(dash='dash' if dataset == 'Gencast' else 'solid' if dataset == 'GEFS' else 'dot')
+                line=dict(dash='dash' if dataset == 'Gencast' else 'solid')
             ))
         
         if len(selected_stats) == 2:
@@ -203,7 +186,7 @@ if df is not None:
                     lon=ensemble_data['Longitude'],
                     mode='lines',
                     name=f'{dataset} Ensemble {ensemble}',
-                    line=dict(width=2, color='blue' if dataset == 'Gencast' else 'red' if dataset == 'GEFS' else 'green'),
+                    line=dict(width=2, color='blue' if dataset == 'Gencast' else 'red'),
                     text=[f"MSLP: {mslp:.2f} hPa, Time: {dt}" for mslp, dt in zip(ensemble_data['MSLP'], ensemble_data['Forecast_Datetime'])],
                     hoverinfo='text+lat+lon'
                 ))
